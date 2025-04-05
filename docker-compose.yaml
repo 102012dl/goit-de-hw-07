@@ -1,30 +1,28 @@
-# docker-compose.yaml 
+# docker-compose.yaml
 # ЦЕЙ ФАЙЛ ТАКИЙ САМИЙ, ЯК І ДЛЯ ІНШИХ ОС
-version: '3.8' 
 
 x-airflow-common: &airflow-common
   image: apache/airflow:2.8.4 # Перевірте актуальну версію в доках Airflow
-  environment:
-    &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor 
-    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow 
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: 'FB0o_ztPV3m8bs7J-44fNvo0jJLw5-_X4fNLC3VdrM8=' # ЗАМІНІТЬ НА СВІЙ ЗГЕНЕРОВАНИЙ КЛЮЧ!
+    AIRFLOW__CORE__FERNET_KEY: 'c1GuiCDDCjAC_ihg-0Mp9R4mRstGEs7osje5cPzBqjA=' # ЗАМІНІТЬ НА СВІЙ ЗГЕНЕРОВАНИЙ КЛЮЧ!
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false' 
-    AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth' 
-    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-mysql 
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-mysql
   volumes:
-    - ./dags:/opt/airflow/dags 
-    - ./logs:/opt/airflow/logs 
-    - ./plugins:/opt/airflow/plugins 
-  depends_on:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+  depends_on: &airflow-common-depends-on
     redis:
       condition: service_healthy
     postgres:
       condition: service_healthy
-  healthcheck:
+  healthcheck: &airflow-common-healthcheck
     test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
     interval: 30s
     timeout: 10s
@@ -32,103 +30,100 @@ x-airflow-common: &airflow-common
 
 services:
   postgres:
-    image: postgres:13 
+    image: postgres:13
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
     ports:
-      - "5432:5432" 
+      - "5432:5432"
+    volumes:
+      - airflow-pg-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 5s
       retries: 5
-    volumes:
-        - airflow-pg-data:/var/lib/postgresql/data
 
   mysql: # НАША ЦІЛЬОВА БАЗА ДАНИХ
-    image: mysql:8.0 
-    command: --default-authentication-plugin=mysql_native_password 
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword 
-      MYSQL_DATABASE: olympic_dataset 
-      MYSQL_USER: user 
-      MYSQL_PASSWORD: password 
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: olympic_dataset
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
     ports:
       - "3307:3306" # Мапимо на порт 3307 хоста (macOS)
     volumes:
-      - airflow-mysql-data:/var/lib/mysql 
+      - airflow-mysql-data:/var/lib/mysql
     healthcheck:
-       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost", "-u", "root", "-prootpassword"]
-       interval: 10s
-       timeout: 5s
-       retries: 5
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
-    image: redis:latest 
+    image: redis:latest
     ports:
-      - "6379:6379" 
+      - "6379:6379"
+    volumes:
+      - airflow-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 1s
       retries: 5
-    volumes:
-      - airflow-redis-data:/data
 
   airflow-webserver:
     <<: *airflow-common
-    command: webserver 
+    command: webserver
     ports:
       - "8080:8080" # Доступ до Airflow UI
     depends_on:
-      <<: *airflow-common.depends_on 
-      mysql: 
-        condition: service_healthy 
+      <<: *airflow-common-depends-on
+      mysql:
+        condition: service_healthy
       airflow-scheduler:
         condition: service_healthy
     healthcheck:
-       <<: *airflow-common.healthcheck
-       test: ["CMD-SHELL", "curl --fail http://localhost:8080/health"]
+      <<: *airflow-common-healthcheck
+      test: ["CMD-SHELL", "curl --fail http://localhost:8080/health"]
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler 
-    environment:
-      <<: *airflow-common-env 
+    command: scheduler
     depends_on:
-      <<: *airflow-common.depends_on 
-      mysql: 
+      <<: *airflow-common-depends-on
+      mysql:
         condition: service_healthy
     healthcheck:
-       <<: *airflow-common.healthcheck
-       test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$$(hostname)\""]
+      <<: *airflow-common-healthcheck
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$$(hostname)\""]
 
   airflow-worker:
     <<: *airflow-common
-    command: celery worker 
-    environment:
-      <<: *airflow-common-env
+    command: celery worker
     depends_on:
-      <<: *airflow-common.depends_on
-      mysql: 
+      <<: *airflow-common-depends-on
+      mysql:
         condition: service_healthy
       airflow-scheduler:
         condition: service_healthy
 
   airflow-init:
-    image: apache/airflow:2.8.4 
+    image: apache/airflow:2.8.4
     entrypoint: /bin/bash
-    command: -c 'airflow db init && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com'
-    environment:
-      <<: *airflow-common-env
+    command: >
+      -c "airflow db init &&
+          airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com"
+    environment: *airflow-common-env
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-volumes: 
+volumes:
   airflow-pg-data:
   airflow-mysql-data:
   airflow-redis-data:
